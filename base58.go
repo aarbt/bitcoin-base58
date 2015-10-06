@@ -126,21 +126,19 @@ func Encode(dst, src []byte) int {
 	return index
 }
 
-// CheckEncode encodes prefix, src and a checksum into
-// CheckEncodedMaxLen(len(src)) or fewer bytes of dst.
-// It returns the number of bytes written to dst.
-func CheckEncode(dst, prefix, src []byte) int {
+// CheckEncode encodes src and a checksum into CheckEncodedMaxLen(len(src)) or
+// fewer bytes of dst.  It returns the number of bytes written to dst.
+func CheckEncode(dst, src []byte) int {
 	var buf bytes.Buffer
-	buf.Write(prefix)
 	buf.Write(src)
 	buf.Write(checksum(buf.Bytes()))
 	return Encode(dst, buf.Bytes())
 }
 
-// CheckEncodeToString returns the prefixed and checksummed base58 encoding of src.
-func CheckEncodeToString(prefix, src []byte) string {
+// CheckEncodeToString returns the checksummed base58 encoding of src.
+func CheckEncodeToString(src []byte) string {
 	dst := make([]byte, CheckEncodedMaxLen(len(src)))
-	n := CheckEncode(dst, prefix, src)
+	n := CheckEncode(dst, src)
 	return string(dst[0:n])
 }
 
@@ -162,7 +160,7 @@ func BitcoinCheckEncode(prefix string, data []byte) (string, error) {
 			"got %d, expected %d.", prefix, len(data), length)
 	}
 	h, _ := hex.DecodeString(prefix) // Can't fail if found in length map.
-	return CheckEncodeToString(h, data), nil
+	return CheckEncodeToString(append(h, data...)), nil
 }
 
 func DecodedMaxLen(x int) int {
@@ -214,64 +212,59 @@ func verifyChecksum(data []byte) bool {
 // of bytes written to dst.
 //
 // If Decode encounters invalid input, it returns an error describing the failure.
-func CheckDecode(dst, src []byte) (int, []byte, error) {
+func CheckDecode(dst, src []byte) (int, error) {
 	if len(src) < kChecksumLength+kMinPrefixLength {
-		return 0, nil, fmt.Errorf("Input too short.")
+		return 0, fmt.Errorf("Input too short.")
 	}
 	n, err := Decode(dst, src)
 	if err != nil {
-		return 0, nil, fmt.Errorf("Failed to decode input (%s): %v",
+		return 0, fmt.Errorf("Failed to decode input (%s): %v",
 			src, err)
 	}
 	if !verifyChecksum(dst[0:n]) {
-		return 0, nil, fmt.Errorf("Checksum mismatch.")
+		return 0, fmt.Errorf("Checksum mismatch.")
 	}
-	prefix, err := getPrefix(dst[0:n])
-	if err != nil {
-		// If prefix is unrecognized, assume it's the first byte.
-		prefix = dst[0:1]
-	}
-	return n - kChecksumLength - len(prefix), prefix, nil
+	return n - kChecksumLength, nil
 }
 
 // CheckDecodeString returns the bytes represented by the checksummed
 // and base58 encoded string s.
-func CheckDecodeString(s string) ([]byte, []byte, error) {
+func CheckDecodeString(s string) ([]byte, error) {
 	if len(s) < kChecksumLength+kMinPrefixLength {
-		return nil, nil, fmt.Errorf("Input too short.")
+		return nil, fmt.Errorf("Input too short.")
 	}
 	dst := make([]byte, DecodedMaxLen(len(s)))
 	n, err := Decode(dst, []byte(s))
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to decode input (%s): %v",
+		return nil, fmt.Errorf("Failed to decode input (%s): %v",
 			s, err)
 	}
 	if !verifyChecksum(dst[0:n]) {
-		return nil, nil, fmt.Errorf("Checksum mismatch.")
+		return nil, fmt.Errorf("Checksum mismatch.")
 	}
-	prefix, err := getPrefix(dst[0:n])
-	if err != nil {
-		// If prefix is unrecognized, assume it's the first byte.
-		prefix = dst[0:1]
-	}
-	return dst[len(prefix) : n-kChecksumLength], prefix, nil
+	return dst[0 : n-kChecksumLength], nil
 }
 
 // BitcoinCheckDecode decodes a checksummed and base58 encoded Bitcoin key or hash.
 // It returns the data and the prefix it was encoded with.
 func BitcoinCheckDecode(src string) ([]byte, string, error) {
-	dst, prefixBytes, err := CheckDecodeString(src)
+	dst, err := CheckDecodeString(src)
 	if err != nil {
 		return nil, "", err
 	}
-	prefix := hex.EncodeToString(prefixBytes)
-	length, found := bitcoinPrefixToLength[prefix]
+	prefix, err := getPrefix(dst)
+	if err != nil {
+		// If prefix is unrecognized, assume it's the first byte.
+		prefix = dst[0:1]
+	}
+	h := hex.EncodeToString(prefix)
+	length, found := bitcoinPrefixToLength[h]
 	if !found {
-		return nil, "", fmt.Errorf("Key has unsupported prefix %q.", prefix)
+		return nil, "", fmt.Errorf("Key has unsupported prefix %q.", h)
 	}
-	if len(dst) != length {
+	if len(dst) != length+len(prefix) {
 		return nil, "", fmt.Errorf("Unexpected length for key with prefix %q; "+
-			"got %d, expected %d.", prefix, len(dst), length)
+			"got %d, expected %d.", h, len(dst), length)
 	}
-	return dst, prefix, nil
+	return dst[len(prefix):], h, nil
 }
