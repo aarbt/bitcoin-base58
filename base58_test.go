@@ -3,7 +3,7 @@ package base58_test
 import (
 	"bytes"
 	"encoding/hex"
-	"github.com/aarbt/bitcoin-base58"
+	"github.com/runeaune/bitcoin-base58"
 	"testing"
 )
 
